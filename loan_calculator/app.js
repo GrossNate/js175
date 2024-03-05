@@ -1,8 +1,18 @@
 const HTTP = require("http");
-const { URL } = require("url");
+const { URL, URLSearchParams } = require("url");
 const HANDLEBARS = require("handlebars");
 const { LoanTerms, LoanCalculator } = require("./loan_classes");
+const FS = require("fs");
+const PATH = require("path");
+const QUERYSTRING = require("querystring");
 
+const MIME_TYPES = {
+  ".css": "text/css",
+  ".js": "application/javascript",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+};
 const PORT = 3000;
 const APR = 0.05;
 const percentFormat = new Intl.NumberFormat(
@@ -23,6 +33,7 @@ const ERROR_MESSAGE_400 = `
 <head>
   <meta charset="utf-8">
   <title>Error: Malformed Request</title>
+  <link rel="stylesheet" href="/assets/css/styles.css">
   <style type="text/css">
     article {color: red; font-size: 2rem; }
   </style>
@@ -42,39 +53,7 @@ const RAW_TEMPLATE = `
   <head>
     <meta charset="utf-8">
     <title>Loan Calculator</title>
-    <style type="text/css">
-      body {
-        background: rgba(250, 250, 250);
-        font-family: sans-serif;
-        color: rgb(50, 50, 50);
-      }
-
-      article {
-        width: 100%;
-        max-width: 40rem;
-        margin: 0 auto;
-        padding: 1rem 2rem;
-      }
-
-      h1 {
-        font-size: 2.5rem;
-        text-align: center;
-      }
-
-      table {
-        font-size: 1.5rem;
-      }
-      th {
-        text-align: right;
-      }
-      td {
-        text-align: center;
-      }
-      th,
-      td {
-        padding: 0.5rem;
-      }
-    </style>
+    <link rel="stylesheet" href="/assets/css/styles.css">
   </head>
   <body>
     <article>
@@ -117,14 +96,51 @@ const RAW_TEMPLATE = `
   </body>
 </html>
 `;
-
+const LOAN_FORM_SOURCE = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Loan Calculator</title>
+    <link rel="stylesheet" href="/assets/css/styles.css">
+  </head>
+  <body>
+    <article>
+      <h1>Loan Calculator</h1>
+      <form action="/loan-offer" method="post">
+        <p>All loans are offered at an APR of {{apr}}%.</p>
+        <label for="amount">How much do you want to borrow (in dollars)?</label>
+        <input type="number" name="amount" id="amount" value="">
+        <label for="duration">How much time do you want to pay back your loan?</label>
+        <input type="number" name="duration" id="duration" value="">
+        <input type="submit" name="" value="Get loan offer!">
+      </form>
+    </article>
+  </body>
+</html>
+`;
 function render(template, data) {
   return HANDLEBARS.compile(template)(data);
 }
 
+/** @returns {URLSearchParams} */
 function getParams(path, host) {
   const myUrl = new URL(path, `http://${host}`);
   return myUrl.searchParams;
+}
+
+function getParsedFormData(request, callback) {
+  let body = "";
+  request.on("data", (chunk) => {
+    body += chunk.toString();
+  });
+  request.on("end", () => {
+    callback(QUERYSTRING.parse(body));
+  });
+}
+
+function getPathname(path, host) {
+  const myUrl = new URL(path, `http://${host}`);
+  return myUrl.pathname;
 }
 
 function generateChangeLink(terms, paramToChange, delta) {
@@ -140,7 +156,7 @@ function generateChangeLink(terms, paramToChange, delta) {
   }
   return {
     url:
-      `/?amount=${newTerms.amount}&duration=${newTerms.periodYears}&apr=${newTerms.apr}`,
+      `/loan-offer?amount=${newTerms.amount}&duration=${newTerms.periodYears}&apr=${newTerms.apr}`,
     label: `${(delta > 0) ? "+" : "-"}${formatter.format(Math.abs(delta))}`,
   };
 }
@@ -164,29 +180,67 @@ function generateLoanOfferData(terms) {
 const SERVER = HTTP.createServer((req, res) => {
   const path = req.url;
   const { host } = req.headers;
-  const params = getParams(path, host);
+  const pathname = getPathname(path, host);
+  const fileExtension = PATH.extname(pathname);
+  const method = req.method;
 
-  if (path === "/favicon.ico") {
-    res.statusCode = 404;
+  if (pathname === "/") {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/html");
+    res.write(render(LOAN_FORM_SOURCE, { apr: "5" }));
     res.end();
-  } else {
-    const terms = new LoanTerms(
-      Number(params.get("amount")),
-      Number(params.get("duration")),
-      Number(params.get("apr")) || APR,
-    );
-    if (terms.amount && terms.periodYears) {
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "text/html");
-      res.write(
-        render(RAW_TEMPLATE, generateLoanOfferData(terms)),
+  } else if (pathname === "/loan-offer") {
+    let terms;
+    if (method === "GET") {
+      const params = getParams(path, host);
+      terms = new LoanTerms(
+        Number(params.get("amount")),
+        Number(params.get("duration")),
+        Number(params.get("apr")) || APR,
       );
-    } else {
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "text/html");
-      res.write(ERROR_MESSAGE_400);
+    } else if (method === "POST") {
+      let query;
+      getParsedFormData(req, (data) => query = data);
+      setTimeout(
+        () => {
+          terms = new LoanTerms(
+            Number(query.amount),
+            Number(query.duration),
+            Number(query.apr) || APR,
+          );
+        },
+        0,
+      );
     }
-    res.end();
+    setTimeout(
+      () => {
+        if (terms.amount && terms.periodYears) {
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/html");
+          res.write(
+            render(RAW_TEMPLATE, generateLoanOfferData(terms)),
+          );
+        } else {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "text/html");
+          res.write(ERROR_MESSAGE_400);
+        }
+        res.end();
+      },
+      0,
+    );
+  } else {
+    FS.readFile(`./public/${pathname}`, (_, data) => {
+      if (data) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", `${MIME_TYPES[fileExtension]}`);
+        res.write(`${data}\n`);
+        res.end();
+      } else {
+        res.statusCode = 404;
+        res.end();
+      }
+    });
   }
 });
 
