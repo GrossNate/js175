@@ -117,7 +117,6 @@ const RAW_TEMPLATE = `
   </body>
 </html>
 `;
-// const LOAN_OFFER_TEMPLATE = HANDLEBARS.compile(RAW_TEMPLATE);
 
 function render(template, data) {
   return HANDLEBARS.compile(template)(data);
@@ -187,13 +186,6 @@ const SERVER = HTTP.createServer((req, res) => {
       res.setHeader("Content-Type", "text/html");
       res.write(ERROR_MESSAGE_400);
     }
-    // res.write('<!doctype html>');
-    // res.write('<html><head>');
-    // res.write(`<title>${generatePageTitle()}</title>`);
-    // res.write('<style type="text/css"> th {text-align: right;}</style>');
-    // res.write('</head><body>');
-    // res.write(generateLoanTermsHtmlTable(getParams(path, host)));
-    // res.write('</body></html>');
     res.end();
   }
 });
