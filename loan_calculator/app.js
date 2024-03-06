@@ -1,18 +1,12 @@
 const HTTP = require('http');
 const { URL } = require('url');
 const HANDLEBARS = require('handlebars');
-const FS = require('fs');
-const PATH = require('path');
 const QUERYSTRING = require('querystring');
+const ROUTER = require('router');
+const FINALHANDLER = require('finalhandler');
+const SERVESTATIC = require('serve-static');
 const { LoanTerms, LoanCalculator } = require('./loan_classes');
 
-const MIME_TYPES = {
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-};
 const PORT = 3000;
 const APR = 0.05;
 const percentFormat = new Intl.NumberFormat(
@@ -144,11 +138,6 @@ function getParsedFormDataPromise(request) {
   });
 }
 
-function getPathname(path, host) {
-  const myUrl = new URL(path, `http://${host}`);
-  return myUrl.pathname;
-}
-
 function generateChangeLink(terms, paramToChange, delta) {
   const newTerms = { ...terms };
   newTerms[paramToChange] += delta;
@@ -185,13 +174,6 @@ function generateLoanOfferData(terms) {
   return data;
 }
 
-function respondIndex(res) {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html');
-  res.write(render(LOAN_FORM_SOURCE, { apr: '5' }));
-  res.end();
-}
-
 function generateLoanOfferResponse(res, terms) {
   if (terms.amount && terms.periodYears) {
     res.statusCode = 200;
@@ -207,17 +189,27 @@ function generateLoanOfferResponse(res, terms) {
   res.end();
 }
 
-function respondLoanOfferGet(res, path, host) {
-  const params = getParams(path, host);
+const router = ROUTER();
+router.use(SERVESTATIC('public'));
+
+router.get('/', (_, res) => {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html');
+  res.write(render(LOAN_FORM_SOURCE, { apr: APR }));
+  res.end();
+});
+
+router.get('/loan-offer', (req, res) => {
+  const params = getParams(req.url, req.headers.host);
   const terms = new LoanTerms(
     Number(params.get('amount')),
     Number(params.get('duration')),
     Number(params.get('apr')) || APR,
   );
   generateLoanOfferResponse(res, terms);
-}
+});
 
-async function respondLoanOfferPost(req, res) {
+router.post('/loan-offer', async (req, res) => {
   const query = await getParsedFormDataPromise(req);
   const terms = new LoanTerms(
     Number(query.amount),
@@ -225,34 +217,15 @@ async function respondLoanOfferPost(req, res) {
     Number(query.apr) || APR,
   );
   generateLoanOfferResponse(res, terms);
-}
+});
+
+router.get('*', (_, res) => {
+  res.statusCode = 404;
+  res.end();
+});
 
 const SERVER = HTTP.createServer((req, res) => {
-  const path = req.url;
-  const { host } = req.headers;
-  const pathname = getPathname(path, host);
-  const fileExtension = PATH.extname(pathname);
-  const { method } = req;
-
-  if (pathname === '/') {
-    respondIndex(res);
-  } else if (pathname === '/loan-offer' && method === 'GET') {
-    respondLoanOfferGet(res, path, host);
-  } else if (pathname === '/loan-offer' && method === 'POST') {
-    respondLoanOfferPost(req, res);
-  } else {
-    FS.readFile(`./public/${pathname}`, (_, data) => {
-      if (data) {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', `${MIME_TYPES[fileExtension]}`);
-        res.write(`${data}\n`);
-        res.end();
-      } else {
-        res.statusCode = 404;
-        res.end();
-      }
-    });
-  }
+  router(req, res, FINALHANDLER(req, res));
 });
 
 SERVER.listen(PORT, () => {
