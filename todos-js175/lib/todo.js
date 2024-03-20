@@ -1,6 +1,10 @@
 const nextId = require("./next-id");
 
 class Todo {
+  static makeToDo(rawTodo) {
+    return Object.assign(new Todo(), rawTodo);
+  }
+
   constructor(title) {
     this.id = nextId();
     this.title = title;
@@ -22,6 +26,14 @@ class Todo {
 
   isDone() {
     return this.done;
+  }
+
+  toggleDoneness() {
+    if (this.isDone()) {
+      this.markUndone();
+    } else {
+      this.markDone();
+    }
   }
 
   setTitle(title) {
